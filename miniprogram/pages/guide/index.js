@@ -10,6 +10,15 @@ Page({
             menus: ['shareAppMessage', 'shareTimeline']
         });
     },
+    onShow() {
+        const tabBar = this.getTabBar?.();
+        if (tabBar && typeof tabBar.setSelected === 'function') {
+            tabBar.setSelected(2);
+        }
+        else if (tabBar && typeof tabBar.setData === 'function') {
+            tabBar.setData({ selected: 2, selectedPath: '/pages/guide/index' });
+        }
+    },
     onToggleManual() {
         this.setData({ manualExpanded: !this.data.manualExpanded });
     },
@@ -25,19 +34,9 @@ Page({
             wx.showToast({ title: '无法识别邮箱地址', icon: 'none' });
             return;
         }
-        wx.showActionSheet({
-            itemList: ['复制邮箱地址', '打开邮箱应用'],
-            success: ({ tapIndex }) => {
-                if (tapIndex === 0) {
-                    wx.setClipboardData({ data: mail });
-                }
-                else if (tapIndex === 1) {
-                    wx.setClipboardData({
-                        data: mail,
-                        success: () => wx.showToast({ title: '已复制，前往邮箱粘贴', icon: 'none' })
-                    });
-                }
-            }
+        wx.setClipboardData({
+            data: mail,
+            success: () => wx.showToast({ title: '邮箱已复制', icon: 'none' })
         });
     },
     onIssueTap(event) {

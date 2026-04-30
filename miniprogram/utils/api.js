@@ -151,8 +151,8 @@ function buildLoginPayload(phone, idcardNo) {
             wifiMac: '02:00:00:00:00:00',
             brand: profile.brand,
             os: 0,
-            // 脱敏处理：发布版不保留开发者设备标识
-            udid: '00000000-0000-0000-0000-000000000000',
+            // udid: 'F08A8B4C-BBF5-418E-8E26-23023DEC4305',
+            udid: '2E382B94-EE0D-4918-9B9D-DDBE42E3E429',
             appVersion: '1.3.6',
             imsi: '46015',
             model: profile.model

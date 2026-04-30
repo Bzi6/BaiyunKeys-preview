@@ -1,0 +1,76 @@
+:host {
+  --tab-bg: #ffffff;
+  --tab-border: #e7edf4;
+  --tab-text: #8a95a3;
+  --tab-text-active: #0aa968;
+}
+
+.tabbar-shell {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 999;
+  padding: 10rpx 28rpx calc(env(safe-area-inset-bottom) + 8rpx);
+  box-sizing: border-box;
+  background: var(--tab-bg);
+  border-top: 1rpx solid var(--tab-border);
+  box-shadow: 0 -6rpx 22rpx rgba(31, 41, 55, 0.06);
+}
+
+.tabbar {
+  min-height: 92rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  gap: 6rpx;
+}
+
+.tab-item {
+  flex: 1;
+  min-width: 0;
+  height: 80rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4rpx;
+  transition: transform 0.18s ease;
+}
+
+.tab-item-active {
+  transform: translateY(-1rpx);
+}
+
+.tab-icon-shell {
+  width: 54rpx;
+  height: 50rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.18s ease;
+}
+
+.tab-item-active .tab-icon-shell {
+  transform: scale(1.03);
+}
+
+.tab-icon-image {
+  width: 46rpx;
+  height: 46rpx;
+  display: block;
+}
+
+.tab-text {
+  font-size: 22rpx;
+  line-height: 1.22;
+  font-weight: 600;
+  color: var(--tab-text);
+  letter-spacing: 0;
+  transition: color 0.18s ease, font-weight 0.18s ease;
+}
+
+.tab-item-active .tab-text {
+  color: var(--tab-text-active);
+  font-weight: 700;
+}

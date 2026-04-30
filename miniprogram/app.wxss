@@ -1,4 +1,14 @@
 page {
-  background-color: #f5f7fa;
+  background-color: #f8fafc;
   color: #1f1f1f;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  font-size: 28rpx;
+  letter-spacing: 0;
+}
+
+button,
+input,
+textarea {
+  font-family: inherit;
+  letter-spacing: 0;
 }

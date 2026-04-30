@@ -26,7 +26,7 @@
     <view class="form-grid">
       <view class="field">
         <view class="label">门禁名称</view>
-        <input class="input" placeholder="如 默认大门" value="{{form.doorName}}" bindinput="onDoorNameInput" maxlength="30" />
+        <input class="input" placeholder="如 默认大门" value="{{form.doorName}}" bindinput="onDoorNameInput" bindblur="onDoorNameBlur" maxlength="30" />
       </view>
       <view class="field">
         <view class="label label-inline">
@@ -76,7 +76,7 @@
     </view>
 
     <view class="info-box">
-      <text class="info-text" user-select="true">1.本功能仅调用平安回家官方接口获取数据，不含任何后门，也不会将个人身份信息保存在本地；\n2.门禁参数仅保存在当前设备，建议成功获取后立即复制备份，避免平安回家APP过期后无法再次获取；\n3.本功能会为你自动新建并保存门禁配置。</text>
+      <text class="info-text" user-select="true">1.本功能仅调用官方接口获取数据，不含任何后门，也不会将个人身份信息保存在本地；\n2.门禁参数仅保存在当前设备，建议成功获取后立即复制备份，避免原APP过期后无法再次获取；\n3.本功能会为你自动新建并保存门禁配置。</text>
     </view>
   </view>
 
@@ -85,6 +85,9 @@
     <view class="quick-actions">
       <button class="ghost quick-action-btn" bindtap="onCopyBackup" disabled="{{saving}}">一键复制</button>
       <button class="ghost quick-action-btn" bindtap="onImportBackup" disabled="{{saving}}">一键导入</button>
+    </view>
+    <view class="info-box">
+      <text class="info-text" user-select="true">一键复制可勾选门禁并生成参数文本，建议保存到微信收藏；一键导入可粘贴备份文本恢复门禁配置，不会覆盖已有门禁。</text>
     </view>
   </view>
 
@@ -114,10 +117,34 @@
         <switch checked="{{autoRetryUnlockEnabled}}" bindchange="onAutoRetryUnlockToggle" color="#f59e0b" />
       </view>
     </view>
+    <view class="toggle-row" wx:if="{{autoRetryUnlockEnabled}}">
+      <view class="toggle-label">
+        <view>超时时间</view>
+        <view class="toggle-note">每次扫描超时后触发重发</view>
+      </view>
+      <view class="retry-controls">
+        <input
+          class="retry-count-input"
+          type="number"
+          value="{{autoRetryUnlockTimeout}}"
+          bindinput="onAutoRetryUnlockTimeoutInput"
+          bindblur="onAutoRetryUnlockTimeoutBlur"
+          maxlength="2"
+        />
+        <view class="retry-unit">秒</view>
+      </view>
+    </view>
+    <view class="toggle-row" wx:if="{{!isIOS}}">
+      <view class="toggle-label">
+        <view>安卓兼容模式</view>
+        <view class="toggle-note">使用定位权限，尝试兼容不同 Android 版本的蓝牙限制</view>
+      </view>
+      <switch checked="{{androidCompatEnabled}}" bindchange="onAndroidCompatToggle" color="#22c55e" />
+    </view>
     <view class="toggle-row">
       <view class="toggle-label">
-        <view>调试日志输出</view>
-        <view class="toggle-note">开启后将在首页显示实时蓝牙日志</view>
+        <view>调试模式</view>
+        <view class="toggle-note">开启后将在首页显示调试日志</view>
       </view>
       <switch checked="{{logEnabled}}" bindchange="onLogToggle" color="#60a5fa" />
     </view>
@@ -152,7 +179,7 @@
         placeholder="请粘贴一键复制的门禁参数文本"
         value="{{backupImportInput.text}}"
         bindinput="onBackupImportInput"
-        maxlength="-1"
+        maxlength="20000"
       />
       <view class="copy-actions">
         <button class="ghost small" bindtap="onBackupImportCancel">取消</button>
@@ -170,7 +197,7 @@
         <view class="copy-line">【2】请通过私聊方式分享。</view>
         <view class="copy-line">【3】请勿在群聊、朋友圈等公开场景传播。</view>
         <view class="copy-line">【4】请勿将门禁参数分享给陌生人。</view>
-        <view class="copy-line">【5】分享链接有效时间默认为24小时。</view>
+        <view class="copy-line">【5】分享链接需要在24小时内点击。</view>
         <view class="copy-line">【6】请谨慎分享，泄露风险需自行承担。</view>
       </view>
       <view class="copy-actions">

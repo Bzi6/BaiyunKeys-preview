@@ -36,6 +36,7 @@ const SHARE_QUERY_KEY = 'sharedDoor';
 const SHARE_EXPIRE_QUERY_KEY = 'sharedDoorExp';
 const SHARE_PAYLOAD_VERSION = 1;
 const SHARE_LINK_TTL_MS = 24 * 60 * 60 * 1000;
+const BACKUP_IMPORT_MAX_LENGTH = 20000;
 function buildCopyPayload(config) {
     const name = (config.doorName || '').trim() || '未命名';
     const mac = (config.mac || '').trim() || '缺失';
@@ -210,8 +211,10 @@ Page({
         isIOS: false,
         logEnabled: false,
         quickUnlockEnabled: false,
+        androidCompatEnabled: false,
         autoRetryUnlockEnabled: false,
         autoRetryUnlockCount: 8,
+        autoRetryUnlockTimeout: 10,
         sharePrompt: {
             visible: false,
             countdown: 0
@@ -242,6 +245,13 @@ Page({
         this.tryImportSharedDoor(options);
     },
     onShow() {
+        const tabBar = this.getTabBar?.();
+        if (tabBar && typeof tabBar.setSelected === 'function') {
+            tabBar.setSelected(1);
+        }
+        else if (tabBar && typeof tabBar.setData === 'function') {
+            tabBar.setData({ selected: 1, selectedPath: '/pages/config/index' });
+        }
         this.detectPlatform();
         this.refreshConfigState();
     },
@@ -251,32 +261,63 @@ Page({
     onUnload() {
         this.clearShareReminderTimer();
     },
-    onShareAppMessage() {
+    getSavedShareConfig() {
         const current = this.getCurrentForm();
+        if (!current.id) {
+            return null;
+        }
+        return (0, config_1.readDoorConfigList)().find((item) => item.id === current.id) || null;
+    },
+    hasUnsavedShareChanges(saved) {
+        const current = (0, configView_1.normalizeConfigForForm)({
+            ...this.getCurrentForm(),
+            logEnabled: saved.logEnabled
+        });
+        const normalizedSaved = (0, configView_1.normalizeConfigForForm)(saved);
+        return (current.doorName !== normalizedSaved.doorName ||
+            current.mac !== normalizedSaved.mac ||
+            current.key !== normalizedSaved.key ||
+            current.bluetoothName !== normalizedSaved.bluetoothName);
+    },
+    buildSharePayload(config) {
         const expireAt = Date.now() + SHARE_LINK_TTL_MS;
-        const encoded = encodeSharedDoor(current, expireAt);
+        const encoded = encodeSharedDoor(config, expireAt);
+        const shareTitle = config.doorName ? `BaiyunKeys - ${config.doorName}` : 'BaiyunKeys - Door';
+        return { encoded, expireAt, shareTitle };
+    },
+    onShareAppMessage() {
+        const saved = this.getSavedShareConfig();
+        if (!saved) {
+            return {
+                title: 'BaiyunKeys',
+                path: '/pages/config/index'
+            };
+        }
+        const { encoded, expireAt, shareTitle } = this.buildSharePayload(saved);
         if (!encoded) {
             return {
                 title: 'BaiyunKeys',
                 path: '/pages/config/index'
             };
         }
-        const shareTitle = current.doorName ? `BaiyunKeys - ${current.doorName}` : 'BaiyunKeys - Door';
         return {
             title: shareTitle,
             path: `/pages/config/index?${SHARE_QUERY_KEY}=${encoded}&${SHARE_EXPIRE_QUERY_KEY}=${expireAt}`
         };
     },
     onShareTimeline() {
-        const current = this.getCurrentForm();
-        const expireAt = Date.now() + SHARE_LINK_TTL_MS;
-        const encoded = encodeSharedDoor(current, expireAt);
+        const saved = this.getSavedShareConfig();
+        if (!saved) {
+            return {
+                title: 'BaiyunKeys'
+            };
+        }
+        const { encoded, expireAt, shareTitle } = this.buildSharePayload(saved);
         if (!encoded) {
             return {
                 title: 'BaiyunKeys'
             };
         }
-        const shareTitle = current.doorName ? `BaiyunKeys - ${current.doorName}` : 'BaiyunKeys - Door';
         return {
             title: shareTitle,
             query: `${SHARE_QUERY_KEY}=${encoded}&${SHARE_EXPIRE_QUERY_KEY}=${expireAt}`
@@ -315,6 +356,15 @@ Page({
         const form = this.getCurrentForm();
         if (!form.id) {
             wx.showToast({ title: '请先保存门禁', icon: 'none' });
+            return;
+        }
+        const saved = this.getSavedShareConfig();
+        if (!saved) {
+            wx.showToast({ title: '请先保存门禁', icon: 'none' });
+            return;
+        }
+        if (this.hasUnsavedShareChanges(saved)) {
+            wx.showToast({ title: '请先保存当前修改后再分享', icon: 'none', duration: 1800 });
             return;
         }
         this.showShareReminder();
@@ -412,8 +462,10 @@ Page({
         const form = (0, configView_1.normalizeConfigForForm)(active);
         const logEnabled = (0, config_1.readLogPreference)();
         const quickUnlockEnabled = (0, config_1.readQuickUnlockPreference)();
+        const androidCompatEnabled = (0, config_1.readAndroidCompatPreference)();
         const autoRetryUnlockEnabled = (0, config_1.readAutoRetryUnlockPreference)();
         const autoRetryUnlockCount = (0, config_1.readAutoRetryUnlockCountPreference)();
+        const autoRetryUnlockTimeout = (0, config_1.readAutoRetryUnlockTimeoutPreference)();
         const nextForm = { ...form, logEnabled };
         const { configs, configNames, configOptions, selectedConfigIndex } = (0, configView_1.buildConfigCollections)(list, form.id || null);
         this.setData({
@@ -425,29 +477,39 @@ Page({
             selectorOpen: false,
             logEnabled,
             quickUnlockEnabled,
+            androidCompatEnabled,
             autoRetryUnlockEnabled,
-            autoRetryUnlockCount
+            autoRetryUnlockCount,
+            autoRetryUnlockTimeout
         });
         this.updateCanSave(nextForm);
     },
     getCurrentForm() {
         return this.data.form;
     },
-    updateCanSave(targetForm) {
+    canSaveForm(targetForm) {
         const form = targetForm || this.getCurrentForm();
         const requireBluetooth = this.data.isIOS;
-        const ready = !!form.doorName &&
+        return (!!(form.doorName || '').trim() &&
             (0, lockBiz_1.isValidMac)(form.mac) &&
             (0, lockBiz_1.isValidKey)(form.key) &&
-            (!requireBluetooth || !!form.bluetoothName);
-        this.setData({ canSave: ready });
+            (!requireBluetooth || !!form.bluetoothName));
+    },
+    updateCanSave(targetForm) {
+        this.setData({ canSave: this.canSaveForm(targetForm) });
     },
     updateFormField(field, value) {
-        this.setData({ [`form.${field}`]: value });
-        this.updateCanSave();
+        const nextForm = {
+            ...this.getCurrentForm(),
+            [field]: value
+        };
+        this.setData({
+            [`form.${field}`]: value,
+            canSave: this.canSaveForm(nextForm)
+        });
     },
-    getActiveDraftKey() {
-        const form = this.getCurrentForm();
+    getActiveDraftKey(targetForm) {
+        const form = targetForm || this.getCurrentForm();
         return form.id || '__temp__';
     },
     cacheDraft(partial) {
@@ -475,13 +537,29 @@ Page({
         });
         this.updateCanSave(merged);
     },
-    clearDraft() {
+    clearDraft(key) {
         const draftState = readDraftState();
-        const key = this.getActiveDraftKey();
-        if (draftState[key]) {
-            delete draftState[key];
+        const draftKey = key || this.getActiveDraftKey();
+        if (draftState[draftKey]) {
+            delete draftState[draftKey];
         }
         writeDraftState(draftState);
+    },
+    resolveSaveBlockedMessage(targetForm) {
+        const form = targetForm || this.getCurrentForm();
+        if (!(form.doorName || '').trim()) {
+            return '请填写门禁名称';
+        }
+        if (!(0, lockBiz_1.isValidMac)(form.mac)) {
+            return '请填写有效门禁 MAC';
+        }
+        if (!(0, lockBiz_1.isValidKey)(form.key)) {
+            return '请填写有效门禁 Key';
+        }
+        if (this.data.isIOS && !form.bluetoothName) {
+            return 'iOS 需填写蓝牙名称';
+        }
+        return '请完善门禁参数';
     },
     showCopyReminder(copyText) {
         const lines = copyText.split('\n').filter((line) => line.trim().length > 0);
@@ -516,7 +594,12 @@ Page({
         }
     },
     onDoorNameInput(event) {
-        const value = (event.detail.value || '').trim();
+        const value = event.detail && typeof event.detail.value === 'string' ? event.detail.value : '';
+        this.updateFormField('doorName', value);
+        this.cacheDraft({ doorName: value });
+    },
+    onDoorNameBlur(event) {
+        const value = event.detail && typeof event.detail.value === 'string' ? event.detail.value.trim() : '';
         this.updateFormField('doorName', value);
         this.cacheDraft({ doorName: value });
     },
@@ -653,7 +736,11 @@ Page({
         });
     },
     onBackupImportInput(event) {
-        const value = event.detail && typeof event.detail.value === 'string' ? event.detail.value : '';
+        const raw = event.detail && typeof event.detail.value === 'string' ? event.detail.value : '';
+        const value = raw.length > BACKUP_IMPORT_MAX_LENGTH ? raw.slice(0, BACKUP_IMPORT_MAX_LENGTH) : raw;
+        if (raw.length > BACKUP_IMPORT_MAX_LENGTH) {
+            wx.showToast({ title: '导入文本过长，已自动截断', icon: 'none', duration: 1600 });
+        }
         this.setData({ 'backupImportInput.text': value });
     },
     onBackupImportCancel() {
@@ -666,6 +753,10 @@ Page({
     },
     onBackupImportConfirm() {
         const text = this.data.backupImportInput.text || '';
+        if (text.length > BACKUP_IMPORT_MAX_LENGTH) {
+            wx.showToast({ title: '导入文本过长，请分批导入', icon: 'none', duration: 1800 });
+            return;
+        }
         const importedList = parseBackupDoorsFromText(text, this.data.logEnabled);
         if (!importedList.length) {
             wx.showToast({ title: '未识别到有效门禁参数', icon: 'none' });
@@ -766,6 +857,7 @@ Page({
             wx.showToast({ title: '尚未保存的门禁无需删除', icon: 'none' });
             return;
         }
+        const draftKey = this.getActiveDraftKey(current);
         wx.showModal({
             title: '确认删除',
             content: '删除后将无法使用该门禁配置，确定继续？',
@@ -774,8 +866,8 @@ Page({
                     return;
                 }
                 (0, config_1.deleteDoorConfig)(current.id);
+                this.clearDraft(draftKey);
                 this.refreshConfigState();
-                this.clearDraft();
                 wx.showToast({ title: '已删除', icon: 'none' });
             }
         });
@@ -787,13 +879,19 @@ Page({
             logEnabled: next,
             'form.logEnabled': next
         });
-        wx.showToast({ title: next ? '已开启调试日志' : '已关闭调试日志', icon: 'none', duration: 1200 });
+        wx.showToast({ title: next ? '已开启调试模式' : '已关闭调试模式', icon: 'none', duration: 1200 });
     },
     onQuickUnlockToggle(event) {
         const next = !!event.detail.value;
         (0, config_1.saveQuickUnlockPreference)(next);
         this.setData({ quickUnlockEnabled: next });
         wx.showToast({ title: next ? '已开启快速开锁' : '已关闭快速开锁', icon: 'none', duration: 1200 });
+    },
+    onAndroidCompatToggle(event) {
+        const next = !!event.detail.value;
+        (0, config_1.saveAndroidCompatPreference)(next);
+        this.setData({ androidCompatEnabled: next });
+        wx.showToast({ title: next ? '已开启安卓兼容模式' : '已关闭安卓兼容模式', icon: 'none', duration: 1200 });
     },
     onAutoRetryUnlockCountInput(event) {
         const raw = (event.detail.value || '').replace(/\D/g, '');
@@ -804,11 +902,26 @@ Page({
         const normalized = (0, config_1.normalizeAutoRetryUnlockCount)(raw);
         this.setData({ autoRetryUnlockCount: normalized });
     },
+    onAutoRetryUnlockTimeoutInput(event) {
+        const raw = (event.detail.value || '').replace(/\D/g, '');
+        if (!raw) {
+            this.setData({ autoRetryUnlockTimeout: '' });
+            return;
+        }
+        const normalized = (0, config_1.normalizeAutoRetryUnlockTimeout)(raw);
+        this.setData({ autoRetryUnlockTimeout: normalized });
+    },
     onAutoRetryUnlockCountBlur(event) {
         const raw = (event.detail.value || '').replace(/\D/g, '');
         const normalized = (0, config_1.normalizeAutoRetryUnlockCount)(raw);
         (0, config_1.saveAutoRetryUnlockCountPreference)(normalized);
         this.setData({ autoRetryUnlockCount: normalized });
+    },
+    onAutoRetryUnlockTimeoutBlur(event) {
+        const raw = (event.detail.value || '').replace(/\D/g, '');
+        const normalized = (0, config_1.normalizeAutoRetryUnlockTimeout)(raw);
+        (0, config_1.saveAutoRetryUnlockTimeoutPreference)(normalized);
+        this.setData({ autoRetryUnlockTimeout: normalized });
     },
     onAutoRetryUnlockToggle(event) {
         const next = !!event.detail.value;
@@ -898,12 +1011,6 @@ Page({
             const active = (0, config_1.setActiveDoorConfig)(firstImported.id);
             const refreshed = (0, config_1.readDoorConfigList)();
             this.applyConfigState(active, refreshed);
-            console.info('[config] remote guard import summary', {
-                total: list.length,
-                imported: imported.length,
-                duplicateCount,
-                skippedCount
-            });
             this.setData({ loginForm: createLoginForm() });
             this.clearDraft();
             const copyPayload = buildCopyPayloadList(imported);
@@ -912,8 +1019,19 @@ Page({
         catch (err) {
             const message = err instanceof Error ? err.message : '获取配置失败';
             console.error('[config] 获取远程配置失败', err);
-            const toastDuration = message.length > 20 ? 5000 : 3000;
-            wx.showToast({ title: message, icon: 'none', duration: toastDuration });
+            const normalizedMessage = String(message || '').trim() || '获取配置失败';
+            if (normalizedMessage.length > 18) {
+                wx.showModal({
+                    title: '获取配置失败',
+                    content: normalizedMessage,
+                    showCancel: false,
+                    confirmText: '知道了'
+                });
+            }
+            else {
+                const toastDuration = normalizedMessage.length > 20 ? 5000 : 3000;
+                wx.showToast({ title: normalizedMessage, icon: 'none', duration: toastDuration });
+            }
         }
         finally {
             this.setData({ fetchingRemote: false });
@@ -923,15 +1041,21 @@ Page({
         }
     },
     async onSave() {
-        if (this.data.saving || !this.data.canSave) {
+        if (this.data.saving) {
             return;
         }
-        this.setData({ saving: true });
+        const draftKey = this.getActiveDraftKey();
+        const payload = (0, configView_1.normalizeConfigForForm)({
+            ...this.getCurrentForm(),
+            logEnabled: this.data.logEnabled
+        });
+        if (!this.canSaveForm(payload)) {
+            this.updateCanSave(payload);
+            wx.showToast({ title: this.resolveSaveBlockedMessage(payload), icon: 'none' });
+            return;
+        }
+        this.setData({ saving: true, canSave: true });
         try {
-            const payload = (0, configView_1.normalizeConfigForForm)({
-                ...this.getCurrentForm(),
-                logEnabled: this.data.logEnabled
-            });
             if (!payload.bluetoothName && payload.id) {
                 const existing = (0, config_1.readDoorConfigList)().find((item) => item.id === payload.id);
                 if (existing && existing.bluetoothName) {
@@ -944,10 +1068,13 @@ Page({
                 return;
             }
             const stored = (0, config_1.saveDoorConfig)(payload);
+            this.clearDraft(draftKey);
+            if (stored.id !== draftKey) {
+                this.clearDraft(stored.id);
+            }
             const refreshed = (0, config_1.readDoorConfigList)();
             this.applyConfigState(stored, refreshed);
             wx.showToast({ title: '保存成功', icon: 'success', duration: 1200 });
-            this.clearDraft();
         }
         catch (err) {
             console.error('[config] 保存失败', err);

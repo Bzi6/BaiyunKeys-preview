@@ -14,10 +14,19 @@ const USER_ACK_TIMEOUT = 3500;
 const FLOW_TIMEOUT = 45000;
 const PREWARM_SCAN_DURATION = 600;
 const LAST_DEVICE_STORAGE_KEY = 'lastDoorDeviceMap';
+const PARAMS_HIDDEN_STORAGE_KEY = 'indexParamsHidden';
 const LOG_MAX_LINES = 80;
 const LOG_PREVIEW_HEX_LENGTH = 64;
+const LOG_EMPTY_VIEWPORT_HEIGHT = 150;
+const LOG_MIN_VIEWPORT_HEIGHT = 176;
+const LOG_VIEWPORT_VERTICAL_PADDING = 74;
+const LOG_LINE_VIEWPORT_HEIGHT = 39;
+const LOG_MAX_VIEWPORT_HEIGHT = 320;
+const LOG_STATUS_MAX_LENGTH = 16;
 const FLOW_ABORT_MESSAGE = 'flow aborted';
 const FLOW_ABORT_DISPLAY_MESSAGE = '已中断当前开锁流程';
+const MASK_CHAR = '＊';
+const MASK_PAIR = `${MASK_CHAR}${MASK_CHAR}`;
 let quickUnlockSessionUsed = false;
 function callWx(fn, options = {}) {
     return new Promise((resolve, reject) => {
@@ -44,6 +53,42 @@ function previewHex(hex, maxLength = LOG_PREVIEW_HEX_LENGTH) {
         return '';
     }
     return hex.length > maxLength ? `${hex.slice(0, maxLength)}...` : hex;
+}
+function readSystemInfo() {
+    const wxAny = wx;
+    try {
+        if (typeof wxAny.getSystemInfoSync === 'function') {
+            return wxAny.getSystemInfoSync() || {};
+        }
+    }
+    catch (err) {
+        console.warn('[debug] 读取系统信息失败', err);
+    }
+    return {};
+}
+function readDeviceInfo() {
+    const wxAny = wx;
+    try {
+        if (typeof wxAny.getDeviceInfo === 'function') {
+            return wxAny.getDeviceInfo() || {};
+        }
+    }
+    catch (err) {
+        console.warn('[debug] 读取设备信息失败', err);
+    }
+    return {};
+}
+function readAppBaseInfo() {
+    const wxAny = wx;
+    try {
+        if (typeof wxAny.getAppBaseInfo === 'function') {
+            return wxAny.getAppBaseInfo() || {};
+        }
+    }
+    catch (err) {
+        console.warn('[debug] 读取小程序信息失败', err);
+    }
+    return {};
 }
 function formatError(err) {
     if (!err) {
@@ -88,6 +133,23 @@ function writeDeviceCache(map) {
     }
     catch (err) {
         console.warn('[BLE] 写入缓存设备信息失败', err);
+    }
+}
+function readParamsHiddenPreference() {
+    try {
+        return !!wx.getStorageSync(PARAMS_HIDDEN_STORAGE_KEY);
+    }
+    catch (err) {
+        console.warn('[index] failed to read params hidden preference', err);
+        return false;
+    }
+}
+function writeParamsHiddenPreference(hidden) {
+    try {
+        wx.setStorageSync(PARAMS_HIDDEN_STORAGE_KEY, !!hidden);
+    }
+    catch (err) {
+        console.warn('[index] failed to save params hidden preference', err);
     }
 }
 function getDoorCacheKey(config) {
@@ -169,6 +231,16 @@ function createBleState() {
         openAckHandled: false
     };
 }
+function createLogStatusState(text = '等待日志', tone = 'idle', pulse = false) {
+    return { text, tone, pulse };
+}
+function buildLogStatusPatch(status) {
+    return {
+        logStatusText: status.text,
+        logStatusTone: status.tone,
+        logStatusPulse: status.pulse
+    };
+}
 function updateBleState(page, patch) {
     const current = page && page.data && page.data.ble ? page.data.ble : (createBleState());
     const next = { ...current, ...patch };
@@ -202,11 +274,18 @@ Page({
         form: (0, configView_1.normalizeConfigForForm)(config_1.DEFAULT_CONFIG),
         state: {
             loading: false,
-            message: ''
+            message: '',
+            previewMessage: '',
+            statusTone: 'normal'
         },
         canSubmit: false,
         logs: [],
         consoleSync: false,
+        logViewportHeight: LOG_EMPTY_VIEWPORT_HEIGHT,
+        logScrollTop: 0,
+        logStatusText: '等待日志',
+        logStatusTone: 'idle',
+        logStatusPulse: false,
         configs: [],
         configNames: [],
         configOptions: [],
@@ -214,9 +293,16 @@ Page({
         selectorOpen: false,
         ble: createBleState(),
         isIOS: false,
+        paramsHidden: false,
+        androidCompatEnabled: false,
+        displayDoorName: '未命名门禁',
+        displayMac: '未填写',
+        displayKey: '未填写',
+        displayBluetoothName: '未填写',
         quickUnlockEnabled: false,
         autoRetryUnlockEnabled: false,
         autoRetryUnlockCount: 8,
+        autoRetryUnlockTimeout: 10,
         autoRetrying: false,
         disclaimerVisible: false,
         disclaimerCountdown: 0
@@ -224,9 +310,26 @@ Page({
     onShow() {
         const self = this;
         self._quickUnlockTriggered = quickUnlockSessionUsed;
+        const tabBar = self.getTabBar?.();
+        if (tabBar && typeof tabBar.setSelected === 'function') {
+            tabBar.setSelected(0);
+        }
+        else if (tabBar && typeof tabBar.setData === 'function') {
+            tabBar.setData({ selected: 0, selectedPath: '/pages/index/index' });
+        }
         this.refreshConfig();
         if (this.data.disclaimerVisible && this.data.disclaimerCountdown > 0 && !this._disclaimerTimer) {
             this.startDisclaimerCountdown();
+        }
+    },
+    onTabReselect() {
+        this.setData({ selectorOpen: false });
+        this.refreshConfig();
+        if (typeof wx.pageScrollTo === 'function') {
+            wx.pageScrollTo({
+                scrollTop: 0,
+                duration: 220
+            });
         }
     },
     showDisclaimer() {
@@ -399,9 +502,22 @@ Page({
         else {
             this.setData({ isIOS: false });
         }
+        const paramsHidden = readParamsHiddenPreference();
         this.setData({
-            canSubmit: this.canSubmitForm()
+            paramsHidden,
+            canSubmit: this.canSubmitForm(),
+            ...this.buildSensitiveDisplayValues(this.data.form, paramsHidden)
         });
+        const wxAny = wx;
+        if (typeof wxAny.onStorageChange === 'function') {
+            const handler = (event) => {
+                if (event && event.key === 'doorConfig') {
+                    this.refreshConfig();
+                }
+            };
+            wxAny.onStorageChange(handler);
+            self._storageChangeHandler = handler;
+        }
         wx.showShareMenu({
             menus: ['shareAppMessage', 'shareTimeline']
         });
@@ -424,6 +540,46 @@ Page({
             title: 'BaiyunKeys'
         };
     },
+    switchToTab(url) {
+        wx.switchTab({
+            url,
+            fail: () => {
+                wx.showToast({ title: '页面跳转失败', icon: 'none', duration: 1400 });
+            }
+        });
+    },
+    onNavMoreTap() {
+        wx.showActionSheet({
+            itemList: ['前往配置页', '前往帮助页'],
+            success: (res) => {
+                if (res.tapIndex === 0) {
+                    this.switchToTab('/pages/config/index');
+                    return;
+                }
+                if (res.tapIndex === 1) {
+                    this.switchToTab('/pages/guide/index');
+                }
+            }
+        });
+    },
+    onNavProfileTap() {
+        wx.showToast({ title: 'BaiyunKeys', icon: 'none', duration: 1200 });
+    },
+    onCopyField(event) {
+        const field = event.currentTarget.dataset.field;
+        const form = this.data.form;
+        const value = field && typeof form[field] === 'string' ? form[field].trim() : '';
+        if (!value) {
+            wx.showToast({ title: '暂无可复制内容', icon: 'none', duration: 1200 });
+            return;
+        }
+        wx.setClipboardData({
+            data: value,
+            success: () => {
+                wx.showToast({ title: '已复制', icon: 'success', duration: 1200 });
+            }
+        });
+    },
     async onUnload() {
         const self = this;
         this.clearDisclaimerTimer();
@@ -431,28 +587,151 @@ Page({
             wx.offBLECharacteristicValueChange();
             self._valueChangeHandler = null;
         }
+        const wxAny = wx;
+        if (self._storageChangeHandler && typeof wxAny.offStorageChange === 'function') {
+            wxAny.offStorageChange(self._storageChangeHandler);
+            self._storageChangeHandler = null;
+        }
         this.clearQuickUnlockTimer();
         await this.cleanupBluetooth();
     },
     onMacInput(event) {
         const value = (0, lockBiz_1.sanitizeMacInput)(event.detail.value || '');
+        const nextForm = { ...this.data.form, mac: value };
         this.setData({
             'form.mac': value,
-            canSubmit: this.canSubmitForm()
+            canSubmit: this.canSubmitForm(nextForm),
+            ...this.buildSensitiveDisplayValues(nextForm, !!this.data.paramsHidden)
         });
     },
     onKeyInput(event) {
         const value = (0, lockBiz_1.sanitizeKey)(event.detail.value || '');
+        const nextForm = { ...this.data.form, key: value };
         this.setData({
             'form.key': value,
-            canSubmit: this.canSubmitForm()
+            canSubmit: this.canSubmitForm(nextForm),
+            ...this.buildSensitiveDisplayValues(nextForm, !!this.data.paramsHidden)
         });
     },
     onBluetoothNameInput(event) {
         const value = (event.detail.value || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+        const nextForm = { ...this.data.form, bluetoothName: value };
         this.setData({
             'form.bluetoothName': value,
-            canSubmit: this.canSubmitForm()
+            canSubmit: this.canSubmitForm(nextForm),
+            ...this.buildSensitiveDisplayValues(nextForm, !!this.data.paramsHidden)
+        });
+    },
+    maskMiddleValue(rawValue, prefixCount, suffixCount) {
+        const raw = (rawValue || '').trim();
+        if (!raw) {
+            return '未填写';
+        }
+        if (raw.length <= prefixCount + suffixCount) {
+            return MASK_CHAR.repeat(Math.max(4, raw.length));
+        }
+        const remain = raw.length - prefixCount - suffixCount;
+        const middleStars = MASK_CHAR.repeat(Math.max(4, Math.min(8, remain)));
+        return `${raw.slice(0, prefixCount)}${middleStars}${raw.slice(-suffixCount)}`;
+    },
+    maskMacValue(rawMac) {
+        const normalized = (rawMac || '').trim().toUpperCase();
+        if (!normalized) {
+            return '未填写';
+        }
+        const segments = normalized.split(':').filter(Boolean);
+        if (segments.length === 6) {
+            return `${segments[0]}:${MASK_PAIR}:${MASK_PAIR}:${MASK_PAIR}:${MASK_PAIR}:${segments[5]}`;
+        }
+        const compact = normalized.replace(/[^0-9A-F]/g, '');
+        if (compact.length === 12) {
+            return `${compact.slice(0, 2)}:${MASK_PAIR}:${MASK_PAIR}:${MASK_PAIR}:${MASK_PAIR}:${compact.slice(10, 12)}`;
+        }
+        return this.maskMiddleValue(normalized, 2, 2);
+    },
+    maskDoorName(rawName) {
+        const normalized = (rawName || '').trim().replace(/\s+/g, ' ');
+        if (!normalized) {
+            return '未命名门禁';
+        }
+        const length = normalized.length;
+        let prefixCount = 2;
+        let suffixCount = 2;
+        if (length <= 4) {
+            prefixCount = 1;
+            suffixCount = 1;
+        }
+        else if (length <= 8) {
+            prefixCount = 2;
+            suffixCount = 2;
+        }
+        else if (length <= 12) {
+            prefixCount = 3;
+            suffixCount = 2;
+        }
+        else {
+            prefixCount = 4;
+            suffixCount = 3;
+        }
+        const tailMatch = normalized.match(/([A-Za-z0-9]+(?:号|栋|座|室|层|单元|幢|期|区|巷|弄))$/);
+        if (tailMatch && tailMatch[1]) {
+            const tail = tailMatch[1];
+            if (tail.length >= 2) {
+                suffixCount = Math.max(suffixCount, Math.min(tail.length, 6));
+            }
+        }
+        if (length <= prefixCount + suffixCount) {
+            if (length <= 2) {
+                return `${normalized.charAt(0)}${MASK_CHAR}`;
+            }
+            return `${normalized.charAt(0)}${MASK_CHAR.repeat(Math.max(1, length - 2))}${normalized.charAt(length - 1)}`;
+        }
+        const middleLength = length - prefixCount - suffixCount;
+        const middleStars = MASK_CHAR.repeat(Math.max(4, Math.min(8, middleLength)));
+        return `${normalized.slice(0, prefixCount)}${middleStars}${normalized.slice(-suffixCount)}`;
+    },
+    buildSensitiveDisplayValues(targetForm, hidden) {
+        const doorName = (targetForm.doorName || '').trim();
+        const mac = (targetForm.mac || '').trim();
+        const key = (targetForm.key || '').trim();
+        const bluetoothName = (targetForm.bluetoothName || '').trim();
+        const displayDoorName = doorName
+            ? hidden
+                ? this.maskDoorName(doorName)
+                : doorName
+            : '未命名门禁';
+        const displayMac = !mac ? '未填写' : hidden ? this.maskMacValue(mac) : mac;
+        const displayKey = !key ? '未填写' : hidden ? this.maskMiddleValue(key, 4, 4) : key;
+        const displayBluetoothName = !bluetoothName ? '未填写' : hidden ? this.maskMiddleValue(bluetoothName, 1, 1) : bluetoothName;
+        return {
+            displayDoorName,
+            displayMac,
+            displayKey,
+            displayBluetoothName
+        };
+    },
+    resolveEffectiveForm(baseForm) {
+        const current = (0, configView_1.normalizeConfigForForm)(baseForm || this.data.form);
+        if (current.mac && current.key) {
+            return current;
+        }
+        const list = (this.data.configs || []);
+        if (!list.length) {
+            return current;
+        }
+        const selected = Number(this.data.selectedConfigIndex);
+        const index = Number.isFinite(selected) && selected >= 0 && selected < list.length ? selected : 0;
+        return (0, configView_1.normalizeConfigForForm)(list[index]);
+    },
+    onToggleParamsHidden() {
+        const nextHidden = !this.data.paramsHidden;
+        const form = this.resolveEffectiveForm(this.data.form);
+        writeParamsHiddenPreference(nextHidden);
+        this.setData({
+            form,
+            canSubmit: this.canSubmitForm(form),
+            paramsHidden: nextHidden,
+            ...this.buildSensitiveDisplayValues(form, nextHidden)
         });
     },
     toggleConfigSelector() {
@@ -488,33 +767,60 @@ Page({
         const form = (0, configView_1.normalizeConfigForForm)(active);
         const logEnabled = (0, config_1.readLogPreference)();
         const quickUnlockEnabled = (0, config_1.readQuickUnlockPreference)();
+        const androidCompatEnabled = (0, config_1.readAndroidCompatPreference)();
         const autoRetryUnlockEnabled = (0, config_1.readAutoRetryUnlockPreference)();
         const autoRetryUnlockCount = (0, config_1.readAutoRetryUnlockCountPreference)();
+        const autoRetryUnlockTimeout = (0, config_1.readAutoRetryUnlockTimeoutPreference)();
         const nextForm = { ...form, logEnabled };
         const { configs, configNames, configOptions, selectedConfigIndex } = (0, configView_1.buildConfigCollections)(list, nextForm.id || null);
+        const displayConfigOptions = configOptions.map((option) => ({
+            ...option,
+            maskedName: this.maskDoorName(option.name)
+        }));
+        const currentLogs = logEnabled && Array.isArray(this.data.logs) ? this.data.logs : [];
         const payload = {
             configs,
             configNames,
-            configOptions,
+            configOptions: displayConfigOptions,
             selectedConfigIndex,
             selectorOpen: false,
             form: nextForm,
             canSubmit: this.canSubmitForm(nextForm),
             consoleSync: logEnabled,
+            logViewportHeight: this.resolveLogViewportHeight(currentLogs),
             quickUnlockEnabled,
+            androidCompatEnabled,
             autoRetryUnlockEnabled,
-            autoRetryUnlockCount
+            autoRetryUnlockCount,
+            autoRetryUnlockTimeout,
+            ...buildLogStatusPatch(this.resolveLogStatusFromLogs(currentLogs)),
+            ...this.buildSensitiveDisplayValues(nextForm, !!this.data.paramsHidden)
         };
         if (!logEnabled) {
             payload.logs = [];
+            payload.logViewportHeight = this.resolveLogViewportHeight([]);
+            payload.logScrollTop = 0;
+            this._logScrollTick = 0;
+            Object.assign(payload, buildLogStatusPatch(createLogStatusState('等待日志', 'idle', false)));
             payload['state.message'] = '';
+            payload['state.previewMessage'] = '';
+            payload['state.statusTone'] = 'normal';
         }
-        this.setData(payload);
+        const wasLogging = this.data.consoleSync;
+        this.setData(payload, () => {
+            if (logEnabled && !wasLogging) {
+                this.setLogStatus(createLogStatusState('调试已开启', 'info', true));
+                this.logDebugSnapshot('调试模式已开启');
+            }
+        });
         this.scheduleQuickUnlock();
     },
     refreshConfig() {
         const list = (0, config_1.readDoorConfigList)();
-        const stored = (0, config_1.readDoorConfig)();
+        let stored = (0, config_1.readDoorConfig)();
+        if ((!stored.mac || !stored.key) && list.length) {
+            stored = (0, config_1.setActiveDoorConfig)(list[0].id);
+        }
         this.applyConfigState(stored, list);
     },
     scheduleQuickUnlock() {
@@ -623,8 +929,9 @@ Page({
             resolver(null);
         }
         const duration = typeof self._flowStartAt === 'number' ? Date.now() - self._flowStartAt : null;
-        this.addLog(duration !== null ? (message + '（总耗时 ' + duration + 'ms）') : message, success);
-        this.setStateMessage(message);
+        this.addLog(duration !== null ? (message + '（总耗时 ' + duration + 'ms）') : message);
+        this.setLogStatus(this.resolveFinalLogStatus(success, message));
+        this.setStateMessage(message, success ? 'normal' : 'error');
         wx.showToast({
             title: message,
             icon: success ? 'success' : 'none',
@@ -644,6 +951,7 @@ Page({
         self._ackTimeoutHandle = setTimeout(() => {
             self._ackTimeoutHandle = null;
             this.addLog('超时：在限定时间内未收到门锁响应');
+            this.setLogStatus(this.resolveFinalLogStatus(false, '未收到门锁响应'));
             this.setStateMessage('未收到门锁响应，请确认门锁状态后再次尝试');
         }, USER_ACK_TIMEOUT);
     },
@@ -677,6 +985,7 @@ Page({
         self._abortingUnlock = true;
         self._interruptRequested = true;
         this.addLog('[中断] 用户请求中断当前开锁流程');
+        this.setLogStatus(createLogStatusState('已中断', 'warn', true));
         this.setStateMessage('正在中断当前开锁流程...');
         this.setData({ 'state.loading': false, autoRetrying: false });
         try {
@@ -741,14 +1050,21 @@ Page({
             this.resetBleRuntime();
             const statePayload = {
                 'state.loading': true,
-                'state.message': attempt === 1 ? '正在检查权限...' : ('正在自动重发（第 ' + attempt + ' 次）...')
+                'state.statusTone': 'normal',
+                'state.message': attempt === 1 ? '正在检查权限...' : ('正在自动重发（第 ' + attempt + ' 次）...'),
+                'state.previewMessage': attempt === 1 ? '开锁中' : '自动重试中'
             };
             statePayload.autoRetrying = attempt > 1;
+            Object.assign(statePayload, buildLogStatusPatch(createLogStatusState(attempt === 1 ? '开锁中' : '自动重试中', attempt === 1 ? 'info' : 'warn', true)));
             if (attempt === 1) {
                 statePayload.logs = [];
+                statePayload.logViewportHeight = this.resolveLogViewportHeight([]);
+                statePayload.logScrollTop = 0;
+                this._logScrollTick = 0;
             }
             this.setData(statePayload);
             if (attempt === 1) {
+                this.logDebugSnapshot('开锁流程开始');
                 this.addLog('开始蓝牙开锁流程 [platform=' + (this.data.isIOS ? 'ios' : 'android/other') + ']');
                 this.addLog('门禁配置已载入，开始执行蓝牙流程');
             }
@@ -756,7 +1072,7 @@ Page({
                 this.addLog('[自动重发] 开始第 ' + attempt + ' 次尝试，剩余可重发 ' + retryRemaining + ' 次');
             }
             try {
-                await this.ensurePermissions();
+                const systemSetting = await this.ensurePermissions({ checkAndroidCompatLocation: false });
                 this.throwIfFlowAborted();
                 this.setStateMessage('正在初始化蓝牙...');
                 await this.ensureBluetoothReady();
@@ -776,11 +1092,7 @@ Page({
                         this.addLog('已直接连接缓存设备');
                     }
                     catch (error) {
-                        const reason = error && typeof error.errMsg === 'string'
-                            ? error.errMsg
-                            : error instanceof Error
-                                ? error.message
-                                : '未知错误';
+                        const reason = formatError(error);
                         this.addLog('缓存设备连接失败：' + reason);
                         removeCachedDeviceId(form);
                         await callWx(wx.closeBLEConnection, {
@@ -789,6 +1101,8 @@ Page({
                     }
                 }
                 if (!deviceId) {
+                    await this.ensureAndroidCompatLocation(systemSetting);
+                    this.throwIfFlowAborted();
                     this.setStateMessage('正在扫描门锁...');
                     const device = await this.discoverDevice(mac);
                     this.throwIfFlowAborted();
@@ -835,15 +1149,10 @@ Page({
                 return;
             }
             catch (err) {
-                const reason = typeof err === 'string'
-                    ? err
-                    : err && typeof err.errMsg === 'string'
-                        ? err.errMsg
-                        : err instanceof Error
-                            ? err.message
-                            : '操作失败';
+                const reason = typeof err === 'string' ? err : formatError(err);
                 if (self._interruptRequested || this.isFlowAbortedReason(reason)) {
                     this.addLog('[中断] 开锁流程已停止');
+                    this.setLogStatus(createLogStatusState('已中断', 'warn', true));
                     this.setStateMessage(FLOW_ABORT_DISPLAY_MESSAGE);
                     this.setData({ 'state.loading': false, autoRetrying: false });
                     return;
@@ -851,12 +1160,14 @@ Page({
                 if (this.shouldAutoRetryUnlock(reason, retryRemaining)) {
                     retryRemaining -= 1;
                     this.addLog('[自动重发] 扫描超时，立即重试，剩余 ' + retryRemaining + ' 次');
-                    this.setStateMessage('扫描超时，正在自动重发（剩余 ' + retryRemaining + ' 次）...');
+                    this.setLogStatus(createLogStatusState('自动重试中', 'warn', true));
+                    this.setStateMessage('扫描超时，正在自动重发（剩余 ' + retryRemaining + ' 次）...', 'normal');
                     continue;
                 }
                 const displayReason = this.getReadableErrorMessage(reason);
                 this.setData({ 'state.loading': false, autoRetrying: false });
-                this.addLog('错误：' + displayReason);
+                this.addLog('错误：' + displayReason + (displayReason !== reason ? (' | 原因=' + reason) : ''));
+                this.setLogStatus(this.resolveFinalLogStatus(false, displayReason));
                 this.setStateMessage(displayReason);
                 return;
             }
@@ -872,6 +1183,265 @@ Page({
             }
         }
     },
+    logDebugSnapshot(reason) {
+        if (!this.data.consoleSync) {
+            return;
+        }
+        const self = this;
+        const now = Date.now();
+        if (self._debugSnapshotAt && now - self._debugSnapshotAt < 1500) {
+            return;
+        }
+        self._debugSnapshotAt = now;
+        const systemInfo = readSystemInfo();
+        const deviceInfo = readDeviceInfo();
+        const appBaseInfo = readAppBaseInfo();
+        const model = (deviceInfo.model || systemInfo.model || '').toString().trim();
+        const brand = (deviceInfo.brand || systemInfo.brand || '').toString().trim();
+        const platform = (systemInfo.platform || deviceInfo.platform || '').toString().trim();
+        const system = (systemInfo.system || deviceInfo.system || '').toString().trim();
+        const wechatVersion = (systemInfo.version || appBaseInfo.version || '').toString().trim();
+        const sdkVersion = (systemInfo.SDKVersion || appBaseInfo.SDKVersion || '').toString().trim();
+        const bluetoothVersion = (systemInfo.bluetoothVersion || deviceInfo.bluetoothVersion || '').toString().trim();
+        const deviceLabel = [brand, model].filter(Boolean).join(' ');
+        this.addLog(`[调试] ${reason}`);
+        this.addLog(`[调试] 设备: ${deviceLabel || 'unknown'} platform=${platform || 'unknown'}`);
+        this.addLog(`[调试] 系统: ${system || 'unknown'} 微信版本=${wechatVersion || 'unknown'} 基础库=${sdkVersion || 'unknown'}`);
+        if (bluetoothVersion) {
+            this.addLog(`[调试] 蓝牙版本=${bluetoothVersion}`);
+        }
+        if (typeof systemInfo.bluetoothEnabled === 'boolean') {
+            this.addLog(`[调试] 蓝牙开关=${systemInfo.bluetoothEnabled ? '开' : '关'}`);
+        }
+    },
+    resolveLogLevel(message) {
+        const text = (message || '').toString();
+        const upper = text.toUpperCase();
+        if (upper.includes('[ERROR]'))
+            return 'ERROR';
+        if (upper.includes('[WARN]'))
+            return 'WARN';
+        if (upper.includes('[DEBUG]'))
+            return 'DEBUG';
+        if (upper.includes('[INFO]'))
+            return 'INFO';
+        if (text.includes('错误') ||
+            text.includes('失败') ||
+            text.includes('异常') ||
+            text.includes('不支持') ||
+            text.includes('未收到') ||
+            text.includes('未匹配')) {
+            return 'ERROR';
+        }
+        if (text.includes('超时') ||
+            text.includes('未发现') ||
+            text.includes('频繁') ||
+            text.includes('重试') ||
+            text.includes('中断') ||
+            text.includes('取消')) {
+            return 'WARN';
+        }
+        if (upper.includes('[DEBUG]') || text.includes('调试'))
+            return 'DEBUG';
+        return 'INFO';
+    },
+    resolveLogTone(message, levelOverride) {
+        const level = levelOverride || this.resolveLogLevel(message);
+        if (level === 'ERROR')
+            return 'log-tone-error';
+        if (level === 'WARN')
+            return 'log-tone-warn';
+        if (level === 'DEBUG')
+            return 'log-tone-debug';
+        return 'log-tone-info';
+    },
+    normalizeLogMessage(message) {
+        const tagMap = {
+            通知解析: 'PARSE',
+            中断: 'ABORT',
+            自动重发: 'RETRY',
+            调试: 'DEBUG',
+            权限: 'PERM',
+            蓝牙: 'BLE',
+            扫描: 'SCAN',
+            连接: 'CONN',
+            服务: 'SERVICE',
+            特征: 'CHAR',
+            通知: 'NOTIFY',
+            写入: 'WRITE',
+            等待: 'WAIT',
+            清理: 'CLEAN',
+            随机数: 'SEED'
+        };
+        const raw = (message || '').toString();
+        return raw.replace(/\[([^\]]+)\]/g, (match, tag) => (tagMap[tag] ? `[${tagMap[tag]}]` : match));
+    },
+    stripLeadingTag(message) {
+        return (message || '').toString().replace(/^\[(DEBUG|INFO|WARN|ERROR|PERM|BLE|SCAN|CONN|SERVICE|CHAR|NOTIFY|WRITE|WAIT|CLEAN|SEED|PARSE|RETRY|ABORT)\]\s*/i, '');
+    },
+    buildLogLine(message, stamp) {
+        const normalized = this.normalizeLogMessage(message);
+        const level = this.resolveLogLevel(normalized);
+        const display = this.stripLeadingTag(normalized);
+        const prefix = stamp ? `${stamp} ` : '';
+        return `${prefix}[${level}] ${display}`;
+    },
+    resolveLogViewportHeight(logsInput) {
+        const logs = Array.isArray(logsInput) ? logsInput : Array.isArray(this.data.logs) ? this.data.logs : [];
+        if (!logs.length) {
+            return LOG_EMPTY_VIEWPORT_HEIGHT;
+        }
+        const visibleLines = Math.min(logs.length, 7);
+        const contentHeight = LOG_VIEWPORT_VERTICAL_PADDING + visibleLines * LOG_LINE_VIEWPORT_HEIGHT;
+        return Math.min(LOG_MAX_VIEWPORT_HEIGHT, Math.max(LOG_MIN_VIEWPORT_HEIGHT, contentHeight));
+    },
+    normalizeLogLine(rawText) {
+        const raw = (rawText || '').toString();
+        const match = raw.match(/^(\d{2}:\d{2}:\d{2}\.\d{3})\s+(.*)$/);
+        const stamp = match ? match[1] : '';
+        const body = match ? match[2] : raw;
+        return this.buildLogLine(body, stamp || undefined);
+    },
+    extractLogStatusText(rawText) {
+        const raw = (rawText || '').toString();
+        const withoutStamp = raw.replace(/^\d{2}:\d{2}:\d{2}\.\d{3}\s+/, '');
+        const withoutLevel = withoutStamp.replace(/^\[(DEBUG|INFO|WARN|ERROR)\]\s*/i, '');
+        return this.stripLeadingTag(withoutLevel)
+            .replace(/^错误[：:]\s*/, '')
+            .replace(/^openBluetoothAdapter\s+失败[：:]\s*/i, '蓝牙初始化失败：')
+            .trim();
+    },
+    compactLogStatusText(text, fallback) {
+        const normalized = (text || '').trim();
+        if (!normalized) {
+            return fallback;
+        }
+        return normalized.length > LOG_STATUS_MAX_LENGTH ? `${normalized.slice(0, LOG_STATUS_MAX_LENGTH)}...` : normalized;
+    },
+    setLogStatus(status) {
+        this.setData(buildLogStatusPatch(status));
+    },
+    resolveActionableErrorStatusText(message) {
+        const text = (message || '').toString().trim();
+        const lower = text.toLowerCase();
+        if (!text) {
+            return '开锁失败';
+        }
+        if (text.includes('扫描触发过于频繁') || text.includes('扫描过于频繁') || lower.includes('scanning too frequently')) {
+            return '扫描太频繁，稍后重试';
+        }
+        if (text.includes('扫描蓝牙设备超时') ||
+            text.includes('未匹配到目标设备') ||
+            text.includes('未发现设备') ||
+            text.includes('未找到可用的门锁设备')) {
+            return '靠近门锁后重试';
+        }
+        if (text.includes('当前环境不支持蓝牙') ||
+            text.includes('不支持蓝牙调试') ||
+            text.includes('环境不支持蓝牙') ||
+            lower.includes('not support')) {
+            return '请用真机调试';
+        }
+        if (text.includes('开启蓝牙') || text.includes('蓝牙功能') || text.includes('bluetooth adapter is not available')) {
+            return '请先开启蓝牙';
+        }
+        if (text.includes('定位权限') || text.includes('系统定位') || text.includes('location')) {
+            return '请开启定位权限';
+        }
+        if (text.includes('未收到门锁响应') || text.includes('未收到最终回执') || text.includes('随机数超时') || text.includes('门锁响应')) {
+            return '门锁无响应，重试';
+        }
+        if (text.includes('握手失败') ||
+            text.includes('通讯密钥协商失败') ||
+            text.includes('密钥') ||
+            text.includes('Key') ||
+            text.includes('SN')) {
+            return '密钥不匹配或被拒';
+        }
+        if (text.includes('未找到目标蓝牙服务') || text.includes('未找到可读写的蓝牙特征') || text.includes('蓝牙服务')) {
+            return '门锁服务异常';
+        }
+        if (text.includes('连接失败') || lower.includes('connect')) {
+            return '连接失败，靠近重试';
+        }
+        return this.compactLogStatusText(text, '开锁失败');
+    },
+    resolveFinalLogStatus(success, message) {
+        if (success) {
+            return createLogStatusState('开锁成功', 'success', true);
+        }
+        const text = (message || '').toString();
+        if (text.includes('中断') || text.includes('取消')) {
+            return createLogStatusState('已中断', 'warn', true);
+        }
+        return createLogStatusState(this.resolveActionableErrorStatusText(text), 'error', true);
+    },
+    resolveLogStatus(rawText, levelOverride) {
+        const level = levelOverride || this.resolveLogLevel(rawText);
+        const text = this.extractLogStatusText(rawText);
+        if (text.includes('开始释放蓝牙资源') ||
+            text.includes('蓝牙资源释放完成') ||
+            text.includes('停止扫描') ||
+            text.includes('处理通知异常')) {
+            return null;
+        }
+        if (text.includes('中断') || text.includes('取消')) {
+            return createLogStatusState('已中断', 'warn', true);
+        }
+        if (text.includes('握手成功') || text.includes('开锁成功')) {
+            return createLogStatusState('开锁成功', 'success', true);
+        }
+        if (level === 'ERROR') {
+            return createLogStatusState(this.resolveActionableErrorStatusText(text), 'error', true);
+        }
+        if (text.includes('自动重发') || text.includes('重试')) {
+            return createLogStatusState('自动重试中', 'warn', true);
+        }
+        if (level === 'WARN') {
+            return createLogStatusState('开锁异常', 'warn', true);
+        }
+        if (level === 'DEBUG') {
+            if (text.includes('调试模式已开启')) {
+                return createLogStatusState('调试已开启', 'info', true);
+            }
+            return null;
+        }
+        if (text.includes('开始蓝牙开锁流程') ||
+            text.includes('门禁配置已载入') ||
+            text.includes('检查系统权限状态') ||
+            text.includes('系统蓝牙状态正常') ||
+            text.includes('定位权限已授权') ||
+            text.includes('系统定位已开启') ||
+            text.includes('调用 openBluetoothAdapter') ||
+            text.includes('蓝牙适配器已就绪') ||
+            text.includes('找到设备') ||
+            text.includes('蓝牙连接成功') ||
+            text.includes('读取蓝牙特征成功') ||
+            text.includes('通道准备完成') ||
+            text.includes('等待门锁回执') ||
+            text.includes('握手指令已发送')) {
+            return createLogStatusState('开锁中', 'info', true);
+        }
+        if (level === 'INFO') {
+            return null;
+        }
+        return null;
+    },
+    resolveLogStatusFromLogs(logsInput) {
+        const logs = Array.isArray(logsInput) ? logsInput : [];
+        if (!logs.length) {
+            return createLogStatusState();
+        }
+        for (let index = logs.length - 1; index >= 0; index -= 1) {
+            const item = logs[index];
+            const rawText = typeof item === 'string' ? item : item && item.text;
+            const status = this.resolveLogStatus(rawText || '');
+            if (status) {
+                return status;
+            }
+        }
+        return createLogStatusState();
+    },
     addLog(message, consoleOverride) {
         const recordEnabled = consoleOverride !== undefined ? consoleOverride : this.data.consoleSync;
         if (!recordEnabled) {
@@ -879,16 +1449,46 @@ Page({
         }
         const now = new Date();
         const stamp = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${padMs(now.getMilliseconds())}`;
-        const line = `${stamp} ${message}`;
+        const normalizedMessage = this.normalizeLogMessage(message);
+        const level = this.resolveLogLevel(normalizedMessage);
+        const line = this.buildLogLine(normalizedMessage, stamp);
+        const tone = this.resolveLogTone(normalizedMessage, level);
         const syncToConsole = consoleOverride !== undefined ? consoleOverride : this.data.consoleSync;
         if (syncToConsole) {
             console.log(`[BLE] ${line}`);
         }
-        const logs = [...this.data.logs.slice(-(LOG_MAX_LINES - 1)), line];
-        this.setData({ logs });
+        const existingRaw = Array.isArray(this.data.logs) ? this.data.logs : [];
+        const existing = existingRaw.map((item) => {
+            const rawText = typeof item === 'string' ? item : item.text;
+            const normalizedText = this.normalizeLogLine(rawText);
+            return { text: normalizedText, tone: this.resolveLogTone(normalizedText) };
+        });
+        const logs = [...existing, { text: line, tone }].slice(-LOG_MAX_LINES);
+        const self = this;
+        self._logScrollTick = (self._logScrollTick || 0) + 1;
+        const nextLogScrollTop = self._logScrollTick * 100000;
+        const payload = {
+            logs,
+            logViewportHeight: this.resolveLogViewportHeight(logs)
+        };
+        this.setData(payload, () => {
+            this.setData({ logScrollTop: nextLogScrollTop });
+        });
     },
     onClearLogs() {
-        this.setData({ logs: [] });
+        const logs = Array.isArray(this.data.logs) ? this.data.logs : [];
+        if (!logs.length) {
+            wx.showToast({ title: '暂无可清空日志', icon: 'none', duration: 1500 });
+            return;
+        }
+        ;
+        this._logScrollTick = 0;
+        this.setData({
+            logs: [],
+            logViewportHeight: this.resolveLogViewportHeight([]),
+            logScrollTop: 0,
+            ...buildLogStatusPatch(createLogStatusState())
+        });
         wx.showToast({ title: '日志已清空', icon: 'none', duration: 1500 });
     },
     onCopyLogs() {
@@ -897,16 +1497,65 @@ Page({
             wx.showToast({ title: '暂无可复制的日志', icon: 'none', duration: 1500 });
             return;
         }
-        const text = logs.join('\n');
+        const text = logs
+            .map((item) => (typeof item === 'string' ? item : item.text))
+            .join('\n');
         wx.setClipboardData({
             data: text,
-            success: () => wx.showToast({ title: '日志已复制', icon: 'success', duration: 1200 })
+            fail: () => wx.showToast({ title: '复制失败，请重试', icon: 'none', duration: 1500 })
         });
     },
-    setStateMessage(message) {
-        this.setData({ 'state.message': message });
+    resolveStatusTone(message) {
+        const text = (message || '').toString();
+        if (!text) {
+            return 'normal';
+        }
+        if (text.includes('失败') ||
+            text.includes('错误') ||
+            text.includes('异常') ||
+            text.includes('超时') ||
+            text.includes('未收到') ||
+            text.includes('不支持') ||
+            text.includes('未匹配') ||
+            text.includes('未发现') ||
+            text.includes('频繁')) {
+            return 'error';
+        }
+        return 'normal';
     },
-    async ensurePermissions() {
+    resolveStatusPreviewMessage(message, tone) {
+        const text = (message || '').toString().trim();
+        if (!text) {
+            return '';
+        }
+        if (text.includes('自动重发') || text.includes('自动重试')) {
+            return '自动重试中';
+        }
+        if (text.includes('中断') || text.includes('取消')) {
+            return '已中断';
+        }
+        if (tone === 'error') {
+            return this.resolveActionableErrorStatusText(text);
+        }
+        if (text.includes('握手成功') || text.includes('开锁成功') || text.includes('成功')) {
+            return '开锁成功';
+        }
+        if (text.includes('正在')) {
+            return '开锁中';
+        }
+        return text;
+    },
+    setStateMessage(message, toneOverride) {
+        const raw = (message || '').toString().trim();
+        const cleaned = raw.replace(/^message=/, '').replace(/^msg=/, '');
+        const tone = toneOverride || this.resolveStatusTone(cleaned);
+        this.setData({
+            'state.message': cleaned,
+            'state.previewMessage': this.resolveStatusPreviewMessage(cleaned, tone),
+            'state.statusTone': tone
+        });
+    },
+    async ensurePermissions(options) {
         this.addLog('检查系统权限状态');
         const wxAny = wx;
         let systemSetting = null;
@@ -921,12 +1570,86 @@ Page({
             }
         }
         else {
-            this.addLog('[权限] 当前基础库不支持 getSystemSetting，跳过系统状态检测');
+            this.addLog('[权限] 当前基础库不支持 getSystemSetting，跳过系统状态检查');
         }
         if (systemSetting && systemSetting.bluetoothEnabled === false) {
             throw new Error('请先在手机系统设置中开启蓝牙功能后再试');
         }
+        if (options?.checkAndroidCompatLocation !== false) {
+            await this.ensureAndroidCompatLocation(systemSetting);
+        }
         this.addLog('系统蓝牙状态正常');
+        return systemSetting;
+    },
+    async ensureAndroidCompatLocation(systemSetting) {
+        if (this.data.isIOS || !this.data.androidCompatEnabled) {
+            return;
+        }
+        const wxAny = wx;
+        let locationEnabled = null;
+        if (systemSetting && typeof systemSetting.locationEnabled === 'boolean') {
+            locationEnabled = systemSetting.locationEnabled;
+        }
+        else if (typeof wxAny.getSystemSetting === 'function') {
+            try {
+                const fallback = wxAny.getSystemSetting();
+                if (fallback && typeof fallback.locationEnabled === 'boolean') {
+                    locationEnabled = fallback.locationEnabled;
+                }
+            }
+            catch (err) {
+                this.addLog('[权限] 兼容模式：读取定位开关失败：' + formatError(err));
+            }
+        }
+        if (locationEnabled === true) {
+            this.addLog('[权限] 兼容模式：系统定位已开启');
+        }
+        else if (locationEnabled === false) {
+            this.addLog('[权限] 兼容模式：系统定位未开启');
+            wx.showToast({
+                title: '兼容模式需要开启系统定位服务',
+                icon: 'none',
+                duration: 2200
+            });
+            throw new Error('兼容模式需要开启系统定位服务');
+        }
+        try {
+            const setting = await callWx(wx.getSetting, {});
+            const authSetting = setting && setting.authSetting ? setting.authSetting : {};
+            const granted = typeof authSetting['scope.userLocation'] === 'boolean' ? authSetting['scope.userLocation'] : null;
+            if (granted === true) {
+                this.addLog('[权限] 兼容模式：定位权限已授权');
+                return;
+            }
+            if (granted === false) {
+                this.addLog('[权限] 兼容模式：定位权限未授权');
+            }
+            try {
+                await callWx(wx.authorize, { scope: 'scope.userLocation' });
+                this.addLog('[权限] 兼容模式：定位授权成功');
+                return;
+            }
+            catch (err) {
+                this.addLog('[权限] 兼容模式：定位授权失败：' + formatError(err));
+                wx.showModal({
+                    title: '需要定位权限',
+                    content: '为提高蓝牙扫描成功率，请在设置中开启定位权限（不会记录位置信息）',
+                    confirmText: '去设置',
+                    success: (res) => {
+                        if (res.confirm) {
+                            if (typeof wx.openSetting === 'function') {
+                                wx.openSetting({});
+                            }
+                        }
+                    }
+                });
+                throw new Error('兼容模式需要开启定位权限');
+            }
+        }
+        catch (err) {
+            this.addLog('[权限] 兼容模式：读取授权状态失败：' + formatError(err));
+            throw new Error('兼容模式需要开启定位权限');
+        }
     },
     async ensureBluetoothReady() {
         const start = Date.now();
@@ -956,24 +1679,56 @@ Page({
         const reversed = reverseMacHex(target);
         const targetName = (this.data.form.bluetoothName || '').toUpperCase();
         const targetNameHex = targetName ? asciiToHex(targetName) : '';
+        const discoveryTimeout = this.data.autoRetryUnlockEnabled
+            ? (0, config_1.normalizeAutoRetryUnlockTimeout)(this.data.autoRetryUnlockTimeout) * 1000
+            : DISCOVERY_TIMEOUT;
         const scanStartedAt = Date.now();
-        this.addLog('[扫描] 开始，timeout=' + DISCOVERY_TIMEOUT + 'ms');
+        const startScan = async (useServices) => {
+            const options = {
+                allowDuplicatesKey: false,
+                interval: 0,
+                powerLevel: 'high'
+            };
+            if (useServices) {
+                options.services = SERVICE_CANDIDATES;
+                page.addLog('[扫描] 使用服务过滤');
+            }
+            else {
+                page.addLog('[扫描] 全量扫描：不带 services 过滤');
+            }
+            await callWx(wx.startBluetoothDevicesDiscovery, options);
+        };
+        this.addLog('[扫描] 开始，timeout=' + discoveryTimeout + 'ms');
         await callWx(wx.stopBluetoothDevicesDiscovery, {}).catch(() => undefined);
-        await callWx(wx.startBluetoothDevicesDiscovery, {
-            allowDuplicatesKey: false,
-            interval: 0,
-            powerLevel: 'high',
-            services: SERVICE_CANDIDATES
-        });
+        await startScan(true);
         return new Promise((resolve, reject) => {
             let settled = false;
             const timer = setTimeout(() => {
-                page.addLog('[扫描] 超时，耗时 ' + (Date.now() - scanStartedAt) + 'ms，未匹配到目标设备');
+                page.addLog('[扫描] 超时，已发现设备 ' + discovered.length + ' 个，耗时 ' + (Date.now() - scanStartedAt) + 'ms，未匹配到目标设备');
                 cleanup();
                 reject(new Error('扫描蓝牙设备超时，请靠近门锁后重试'));
-            }, DISCOVERY_TIMEOUT);
+            }, discoveryTimeout);
+            const fallbackDelay = Math.max(500, Math.min(2500, discoveryTimeout - 500));
+            let fallbackTimer = null;
+            let fallbackTried = false;
+            let seenAny = false;
             const debugSeen = new Set();
             const discovered = [];
+            const triggerFallback = async () => {
+                if (settled || fallbackTried || seenAny) {
+                    return;
+                }
+                fallbackTried = true;
+                page.addLog('[扫描] 未发现设备，尝试全量扫描（不带 services 过滤）');
+                await callWx(wx.stopBluetoothDevicesDiscovery, {}).catch(() => undefined);
+                await new Promise((resolve) => setTimeout(resolve, 200));
+                try {
+                    await startScan(false);
+                }
+                catch (err) {
+                    page.addLog('[扫描] 全量扫描启动失败：' + formatError(err));
+                }
+            };
             const logDevice = (device) => {
                 if (!device)
                     return;
@@ -995,6 +1750,9 @@ Page({
             const listener = (res) => {
                 if (!res.devices)
                     return;
+                if (!seenAny && res.devices.length) {
+                    seenAny = true;
+                }
                 for (const device of res.devices) {
                     logDevice(device);
                     discovered.push(device);
@@ -1043,13 +1801,17 @@ Page({
                     return;
                 settled = true;
                 clearTimeout(timer);
+                if (fallbackTimer) {
+                    clearTimeout(fallbackTimer);
+                    fallbackTimer = null;
+                }
                 wx.offBluetoothDeviceFound();
                 if (self._activeScanCancel === cancelScan) {
                     self._activeScanCancel = null;
                 }
                 self._deviceFoundListener = null;
                 self._lastScanDevices = discovered;
-                page.addLog(`停止扫描，共记录设备 ${discovered.length} 个，耗时 ${Date.now() - scanStartedAt}ms`);
+                page.addLog(`停止扫描，共发现设备 ${discovered.length} 个，耗时 ${Date.now() - scanStartedAt}ms`);
                 callWx(wx.stopBluetoothDevicesDiscovery, {}).catch(() => undefined);
             };
             const cancelScan = () => {
@@ -1063,6 +1825,11 @@ Page({
             self._activeScanCancel = cancelScan;
             self._deviceFoundListener = listener;
             wx.onBluetoothDeviceFound(listener);
+            fallbackTimer = setTimeout(() => {
+                triggerFallback().catch((err) => {
+                    page.addLog('[扫描] 全量扫描异常：' + formatError(err));
+                });
+            }, fallbackDelay);
         });
     },
     async connectDevice(deviceId, timeout = 8000) {
@@ -1227,7 +1994,12 @@ Page({
     },
     async cleanupBluetooth() {
         const self = this;
-        this.addLog('[清理] 开始释放蓝牙资源');
+        const now = Date.now();
+        const suppressLog = self._cleanupLoggedAt && now - self._cleanupLoggedAt < 800;
+        if (!suppressLog) {
+            self._cleanupLoggedAt = now;
+            this.addLog('[清理] 开始释放蓝牙资源');
+        }
         this.clearAckTimer();
         self._activeScanCancel = null;
         if (self._deviceFoundListener) {
@@ -1247,6 +2019,8 @@ Page({
         self._seedReject = null;
         self._ackResolve = null;
         self._randomSeed = null;
-        this.addLog('[清理] 蓝牙资源释放完成');
+        if (!suppressLog) {
+            this.addLog('[清理] 蓝牙资源释放完成');
+        }
     }
 });

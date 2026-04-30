@@ -1,27 +1,29 @@
 .page {
   min-height: 100vh;
-  padding: 44rpx 28rpx 60rpx;
+  padding: 32rpx 28rpx calc(180rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
   background: linear-gradient(180deg, #edf2fb 0%, #f8fafc 100%);
   display: flex;
   flex-direction: column;
-  gap: 32rpx;
+  gap: 26rpx;
 }
 
 
 .card {
   background: #ffffff;
-  border-radius: 26rpx;
-  padding: 40rpx 36rpx;
-  box-shadow: 0 16rpx 36rpx rgba(15, 23, 42, 0.08);
+  border-radius: 22rpx;
+  padding: 34rpx 32rpx;
+  box-shadow: 0 12rpx 30rpx rgba(15, 23, 42, 0.07);
+  border: 1rpx solid rgba(148, 163, 184, 0.16);
   display: flex;
   flex-direction: column;
-  gap: 28rpx;
+  gap: 24rpx;
 }
 
 .card-title {
-  font-size: 32rpx;
-  font-weight: 600;
+  font-size: 31rpx;
+  line-height: 1.25;
+  font-weight: 700;
   color: #0f172a;
 }
 
@@ -37,13 +39,13 @@
 
 .mini-btn {
   min-width: 140rpx;
-  height: 60rpx;
-  line-height: 60rpx;
+  height: 56rpx;
+  line-height: 56rpx;
   border-radius: 16rpx;
   background: #fef3c7;
   color: #b45309;
   border: 1rpx solid rgba(180, 83, 9, 0.25);
-  font-size: 26rpx;
+  font-size: 23rpx;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -64,20 +66,23 @@
   border-radius: 18rpx;
   border: 2rpx solid #e2e8f0;
   background: #f8fafc;
-  font-size: 28rpx;
+  font-size: 27rpx;
+  line-height: 1.25;
   color: #1f2937;
   flex: 1;
+  min-width: 0;
 }
 
 .selector-text {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .selector-icon {
-  font-size: 24rpx;
+  font-size: 22rpx;
   color: #94a3b8;
   margin-left: 16rpx;
 }
@@ -97,7 +102,7 @@
   padding: 20rpx;
   border-radius: 18rpx;
   border: 2rpx solid rgba(148, 163, 184, 0.35);
-  font-size: 28rpx;
+  font-size: 25rpx;
   color: #1f2937;
   background: rgba(255, 255, 255, 0.95);
   transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
@@ -122,6 +127,7 @@
   justify-content: space-between;
   align-items: center;
   gap: 24rpx;
+  min-width: 0;
 }
 
 .selector-name {
@@ -136,7 +142,7 @@
   border-radius: 999rpx;
   background: #2563eb;
   color: #ffffff;
-  font-size: 22rpx;
+  font-size: 21rpx;
 }
 
 .selector-add-text {
@@ -159,7 +165,9 @@
 }
 
 .label {
-  font-size: 26rpx;
+  font-size: 23rpx;
+  line-height: 1.35;
+  font-weight: 600;
   color: #475569;
 }
 
@@ -170,12 +178,12 @@
 }
 
 .label-main {
-  font-size: 26rpx;
+  font-size: 23rpx;
   color: inherit;
 }
 
 .label-note {
-  font-size: 22rpx;
+  font-size: 23rpx;
   color: #94a3b8;
 }
 
@@ -185,7 +193,8 @@
   border-radius: 16rpx;
   background: #f8fafc;
   border: 2rpx solid #e2e8f0;
-  font-size: 30rpx;
+  font-size: 27rpx;
+  line-height: 1.3;
   color: #0f172a;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -209,7 +218,7 @@
   border: 2rpx solid #93c5fd;
   background: #eff6ff;
   color: #1d4ed8;
-  font-size: 30rpx;
+  font-size: 28rpx;
   font-weight: 600;
   display: flex;
   align-items: center;
@@ -240,7 +249,7 @@
   flex: 1;
   width: auto;
   height: 82rpx;
-  font-size: 28rpx;
+  font-size: 27rpx;
   border-color: #bfdbfe;
   background: #f8fbff;
 }
@@ -254,7 +263,7 @@
   border-radius: 18rpx;
   background: linear-gradient(130deg, #2563eb, #3b82f6);
   color: #ffffff;
-  font-size: 32rpx;
+  font-size: 28rpx;
   font-weight: 600;
   border: none;
   box-shadow: 0 12rpx 24rpx rgba(37, 99, 235, 0.25);
@@ -275,7 +284,7 @@
   border: 2rpx solid #cbd5f5;
   color: #2563eb;
   background: #f8fafc;
-  font-size: 30rpx;
+  font-size: 28rpx;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -285,7 +294,7 @@
 .ghost.small {
   flex: 1;
   height: 72rpx;
-  font-size: 28rpx;
+  font-size: 27rpx;
   width: auto;
   padding: 0 24rpx;
 }
@@ -300,7 +309,7 @@
   border-radius: 16rpx;
   background: linear-gradient(130deg, #14b8a6, #0ea5e9);
   color: #ffffff;
-  font-size: 30rpx;
+  font-size: 28rpx;
   font-weight: 600;
   border: none;
   box-shadow: 0 12rpx 24rpx rgba(14, 165, 233, 0.25);
@@ -313,7 +322,7 @@
 .primary.small {
   flex: 1;
   height: 72rpx;
-  font-size: 28rpx;
+  font-size: 27rpx;
   width: auto;
   padding: 0 24rpx;
 }
@@ -326,9 +335,9 @@
 }
 
 .info-text {
-  font-size: 24rpx;
+  font-size: 25rpx;
   color: #475569;
-  line-height: 1.7;
+  line-height: 1.66;
 }
 
 .compact .toggle-row {
@@ -345,13 +354,14 @@
 }
 
 .toggle-label {
-  font-size: 28rpx;
+  font-size: 27rpx;
+  line-height: 1.35;
   color: #1f2937;
   font-weight: 500;
 }
 
 .toggle-note {
-  font-size: 22rpx;
+  font-size: 23rpx;
   color: #94a3b8;
   margin-top: 6rpx;
 }
@@ -368,7 +378,7 @@
   border-radius: 12rpx;
   border: 2rpx solid #e2e8f0;
   background: #f8fafc;
-  font-size: 26rpx;
+  font-size: 25rpx;
   color: #0f172a;
   text-align: center;
   padding: 0 10rpx;
@@ -376,7 +386,7 @@
 }
 
 .retry-unit {
-  font-size: 24rpx;
+  font-size: 23rpx;
   color: #64748b;
   min-width: 26rpx;
 }
@@ -409,7 +419,8 @@
 }
 
 .copy-title {
-  font-size: 34rpx;
+  font-size: 31rpx;
+  line-height: 1.3;
   font-weight: 700;
   color: #0f172a;
   text-align: center;
@@ -446,7 +457,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22rpx;
+  font-size: 21rpx;
   font-weight: 700;
 }
 
@@ -458,8 +469,12 @@
 
 .backup-select-name {
   flex: 1;
-  font-size: 28rpx;
+  min-width: 0;
+  font-size: 25rpx;
   color: #1f2937;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .backup-textarea {
@@ -471,13 +486,13 @@
   background: #f8fbff;
   padding: 20rpx;
   box-sizing: border-box;
-  font-size: 28rpx;
+  font-size: 25rpx;
   color: #0f172a;
   line-height: 1.6;
 }
 
 .copy-line {
-  font-size: 28rpx;
+  font-size: 25rpx;
   color: #475569;
   line-height: 1.6;
   white-space: pre-wrap;
@@ -506,4 +521,37 @@
   width: 100%;
   max-width: 420rpx;
   padding: 0 48rpx;
+}
+
+@media (orientation: landscape) {
+  .page {
+    padding: 24rpx 28rpx calc(180rpx + env(safe-area-inset-bottom));
+    gap: 24rpx;
+  }
+
+  .card {
+    padding: 32rpx 30rpx;
+    gap: 22rpx;
+  }
+
+  .card.compact {
+    padding: 24rpx 28rpx;
+  }
+
+  .copy-modal {
+    max-width: 700rpx;
+  }
+
+  .copy-content {
+    max-height: 320rpx;
+  }
+
+  .backup-select-list {
+    max-height: 380rpx;
+  }
+
+  .backup-textarea {
+    min-height: 220rpx;
+    max-height: 320rpx;
+  }
 }

@@ -3,7 +3,7 @@
     <view class="card-title center">免责声明</view>
     <view class="card-list">
       <view class="list-item dot">本程序没有任何云端和后门，所有门禁参数仅保存在当前设备，可随时通过清理微信缓存移除。</view>
-      <view class="list-item dot">本程序仅调用平安回家官方接口，不修改或绕过官方鉴权，不会在微信缓存中保存个人身份信息。</view>
+      <view class="list-item dot">本程序仅调用官方接口，不修改或绕过官方鉴权，不会在微信缓存中保存个人身份信息。</view>
       <view class="list-item dot">本程序永久完全免费，仅供学习交流使用，禁止用于其他任何商业或非法用途。</view>
     </view>
   </view>
@@ -45,7 +45,7 @@
         <view class="step-index">1</view>
         <view class="step-content">
             <view class="step-label">退出原应用</view>
-            <view class="step-desc">先在“平安回家” App 或小程序退出账号，确保不会因登录状态冲突而导致获取配置失败。</view>
+            <view class="step-desc">先在“平安XX” App 或小程序退出账号，确保不会因登录状态冲突而导致获取配置失败。</view>
         </view>
       </view>
       <view class="step-item">
@@ -80,7 +80,7 @@
           <view class="step-desc">在可提取 App 数据的设备上获取门禁数据库文件：</view>
           <view class="sub-list">
             <view class="bullet">Root 设备：前往 <text class="code">/data/data/com.huacheng.baiyunuser/databases/</text> 导出 `(32位hash).db`。</view>
-            <view class="bullet">无 Root（MIUI 示例）：通过「设置 → 我的设备 → 备份与恢复」备份，仅勾选“平安回家”，随后在 <text class="code">/sdcard/MIUI/backup/AllBackup/备份时间/</text> 中解压 `com.huacheng.baiyunuser.bak` 提取数据库。</view>
+            <view class="bullet">无 Root（MIUI 示例）：通过「设置 → 我的设备 → 备份与恢复」备份，仅勾选“平安XX”，随后在 <text class="code">/sdcard/MIUI/backup/AllBackup/备份时间/</text> 中解压 `com.huacheng.baiyunuser.bak` 提取数据库。</view>
           </view>
         </view>
       </view>
@@ -168,30 +168,51 @@
           <view class="tip-icon backup">☁</view>
           <view class="tip-label">定期备份</view>
         </view>
-        <view class="tip-desc">定期复制并备份门禁参数，防止平安回家官方应用过期后无法再次获取。</view>
+        <view class="tip-desc">定期复制并备份门禁参数，防止平安XX官方应用过期后无法再次获取。</view>
       </view>
     </view>
   </view>
 
   <view class="card">
     <view class="card-title">常见问题</view>
-    <view class="faq-text single">常见问题整理中，发现疑问欢迎通过下方渠道反馈。</view>
+    <view class="faq-item">
+      <view class="faq-title">Q1. 能否远程开门？</view>
+      <view class="faq-desc">不能。本程序仅在手机蓝牙与门禁设备直连时开锁，原理上无法实现远程开门。</view>
+    </view>
+    <view class="faq-item">
+      <view class="faq-title">Q2. 分享链接“24小时有效”是什么意思？</view>
+      <view class="faq-desc">24 小时仅指分享链接本身的导入时效，超过时间后链接失效，不是对方门禁权限的有效时间。</view>
+    </view>
+    <view class="faq-item">
+      <view class="faq-title">Q3. iOS 无网时从桌面启动失败怎么办？</view>
+      <view class="faq-desc">这是 iOS 系统限制。无网时建议从微信下拉“最近使用的小程序”启动，通常可正常使用。</view>
+    </view>
+    <view class="faq-item">
+      <view class="faq-title">Q4. 会影响原APP的使用吗？</view>
+      <view class="faq-desc">不会影响。</view>
+    </view>
   </view>
 
   <view class="card">
     <view class="card-title">提交 Bug / 反馈建议</view>
     <view class="info-block">
-      <view class="info-paragraph">遇到问题或有优化建议，可通过以下公开渠道反馈：</view>
+      <view class="info-paragraph">遇到问题或有优化建议，可通过以下方式联系开发者：</view>
       <view class="info-contact">
-        <view class="info-label">邮箱（占位）</view>
-        <text class="code link" user-select="true" bindtap="onMailTap" data-mail="support@example.com">support@example.com</text>
+        <view class="info-label">客服</view>
+        <view class="code link contact-link">
+          <text>点击跳转客服聊天</text>
+          <button class="contact-link-btn" open-type="contact"></button>
+        </view>
       </view>
       <view class="info-contact">
-        <view class="info-label">Issue（占位）</view>
-        <text class="code link" user-select="true" bindtap="onIssueTap" data-url="https://github.com/your-org/your-repo/issues">https://github.com/your-org/your-repo/issues</text>
+        <view class="info-label">邮箱</view>
+        <text class="code link" user-select="true" bindtap="onMailTap" data-mail="collin4561@163.com">collin4561@163.com</text>
+      </view>
+      <view class="info-contact">
+        <view class="info-label">Issues</view>
+        <text class="code link" user-select="true" bindtap="onIssueTap" data-url="https://github.com/1136623363/BaiyunKeys-preview/issues">https://github.com/1136623363/BaiyunKeys-preview/issues</text>
       </view>
       <view class="info-hint">建议附上关键截图或调试日志，便于快速定位问题。</view>
     </view>
   </view>
-
 </view>
